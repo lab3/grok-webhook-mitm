@@ -34,19 +34,43 @@ respond, GitHub records a failure even though Grok received the event.
 Set each one with `npx wrangler secret put <NAME>`, which prompts for the
 value. `wrangler deploy` refuses to run until all three are set.
 
+Run `wrangler secret put` from this directory. Wrangler reads the Worker name
+from `wrangler.jsonc`, and from anywhere else the secret doesn't reach this
+Worker. Each successful change takes effect within seconds and shows up as a
+"Secret Change" entry in `npx wrangler versions list`.
+
 To generate a GitHub secret, run `openssl rand -hex 32`.
 
 ## GitHub webhook settings
 
-- Payload URL: `https://grok-webhook-mitm.workarea.io/`
-- Content type: `application/json`
+The webhook can belong to a GitHub App or to a single repository. The secret
+lives in a different place for each:
+
+- GitHub App: Settings → Developer settings → GitHub Apps → your app →
+  General → Webhook. Subscribe to events under Permissions & events.
+  Deliveries are under Advanced → Recent Deliveries.
+- Repository: the repository's Settings → Webhooks. Set content type to
+  `application/json` and pick events there. Deliveries are under the
+  webhook's Recent Deliveries tab.
+
+For either kind:
+
+- Webhook URL: `https://grok-webhook-mitm.workarea.io/`
 - Secret: the value of `GITHUB_WEBHOOK_SECRET`
 - SSL verification: enabled
-- Events: pick the ones Grok should act on. The Worker forwards every event
-  except `ping`.
 
-When you save the webhook, GitHub sends a ping. A 200 `pong` in the Recent
-Deliveries tab confirms the secret matches.
+The Worker forwards every event except `ping`, so the events you subscribe to
+are the events Grok receives.
+
+A new repository webhook gets a ping, and a 200 `pong` confirms the secret
+matches. After changing the secret, trigger a fresh event to test it. A
+redelivery may still carry the old signature.
+
+## Troubleshooting
+
+A 401 `Invalid signature` means the delivery arrived with a signature, but
+GitHub and the Worker hold different secrets. Set the same value in both
+places. Run `npx wrangler tail` to watch deliveries arrive.
 
 ## Development
 
