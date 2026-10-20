@@ -20,12 +20,7 @@ The Worker checks `X-Hub-Signature-256` before it forwards anything.
 | Valid signature, any other event | Default Grok status and body | `GROK_WEBHOOK_URL` |
 | Valid signature, chosen target unreachable | 502 | Attempted |
 
-A delivery counts as Carecise when any of these is true:
-
-- `installation.id` is `168716427`
-- `installation.account.login` is `carecise` (any case)
-- `repository.owner.login` is `carecise` (any case)
-- `organization.login` is `carecise` (any case)
+A delivery counts as Carecise when `installation.account.login`, `repository.owner.login`, or `organization.login` is `carecise` (any case). Installation id is not used.
 
 If either Carecise secret is unset, or the body is not valid JSON, the delivery uses the default Grok webhook.
 The body is forwarded byte for byte, with `Content-Type`, `X-GitHub-Event`

@@ -141,8 +141,6 @@ describe("signed deliveries", () => {
 
 const CARECISE_URL = "https://carecise.example/hooks/routine";
 const CARECISE_KEY = "carecise-key-456";
-// Installation id hard-coded in the worker deployed on 2026-10-17.
-const CARECISE_INSTALLATION_ID = 168716427;
 
 const careciseEnv: Env = {
   ...env,
@@ -176,14 +174,7 @@ describe("Carecise routing", () => {
   it.each([
     ["repository owner", { repository: { owner: { login: "Carecise" } } }],
     ["organization", { organization: { login: "CARECISE" } }],
-    ["installation account", { installation: { id: 1, account: { login: "carecise" } } }],
-    [
-      "installation id",
-      {
-        installation: { id: CARECISE_INSTALLATION_ID, account: { login: "renamed" } },
-        repository: { owner: { login: "renamed" } },
-      },
-    ],
+    ["installation account", { installation: { account: { login: "carecise" } } }],
   ])("routes a Carecise event detected by %s to the Carecise routine", async (_how, payload) => {
     const sent = stubGrok(grokAccepts);
     const { request, body } = await signedJson(payload);
@@ -196,6 +187,21 @@ describe("Carecise routing", () => {
     expect(sent[0].headers.get("authorization")).toBe(`Bearer ${CARECISE_KEY}`);
     expect(sent[0].headers.get("x-github-event")).toBe("push");
     expect(await sent[0].text()).toBe(body);
+  });
+
+  it("does not route by installation id when the logins are not Carecise", async () => {
+    const sent = stubGrok(grokAccepts);
+    const { request } = await signedJson({
+      installation: { id: 168716427, account: { login: "renamed" } },
+      repository: { owner: { login: "renamed" } },
+      organization: { login: "renamed" },
+    });
+    const res = await worker.fetch(request, careciseEnv);
+
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(env.GROK_WEBHOOK_URL);
+    expect(sent[0].headers.get("authorization")).toBe(`Bearer ${env.GROK_WEBHOOK_KEY}`);
   });
 
   it("routes a non-Carecise event to the default Grok webhook", async () => {

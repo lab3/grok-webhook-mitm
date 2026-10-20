@@ -8,10 +8,6 @@
 const SIGNATURE_PREFIX = "sha256=";
 const FORWARDED_HEADERS = ["content-type", "x-github-event", "x-github-delivery"];
 
-// GitHub App installation on the Carecise account, as deployed on 2026-10-17.
-// The login checks below still match that account if the installation id changes.
-const CARECISE_INSTALLATION_ID = 168716427;
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method !== "POST") {
@@ -46,7 +42,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 interface GithubWebhookPayload {
-  installation?: { id?: unknown; account?: { login?: unknown } };
+  installation?: { account?: { login?: unknown } };
   repository?: { owner?: { login?: unknown } };
   organization?: { login?: unknown };
 }
@@ -55,7 +51,6 @@ function isCarecise(p: unknown): boolean {
   const lc = (v: unknown): string => (typeof v === "string" ? v.toLowerCase() : "");
   const payload = (typeof p === "object" && p !== null ? p : {}) as GithubWebhookPayload;
   return (
-    payload.installation?.id === CARECISE_INSTALLATION_ID ||
     lc(payload.installation?.account?.login) === "carecise" ||
     lc(payload.repository?.owner?.login) === "carecise" ||
     lc(payload.organization?.login) === "carecise"
