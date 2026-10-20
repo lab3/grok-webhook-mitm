@@ -1,9 +1,16 @@
 // Relays GitHub webhook deliveries to a Grok webhook. GitHub signs each
 // delivery with HMAC-SHA256 but cannot send a custom Authorization header, so
 // this Worker checks the signature and adds the bearer key Grok expects.
+//
+// Carecise events go to CARECISE_ROUTINE_URL when both Carecise secrets are
+// set. Every other event goes to GROK_WEBHOOK_URL.
 
 const SIGNATURE_PREFIX = "sha256=";
 const FORWARDED_HEADERS = ["content-type", "x-github-event", "x-github-delivery"];
+
+// GitHub App installation on the Carecise account, as deployed on 2026-10-17.
+// The login checks below still match that account if the installation id changes.
+const CARECISE_INSTALLATION_ID = 168716427;
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -22,20 +29,53 @@ export default {
       return new Response("pong");
     }
 
-    const headers = new Headers({ authorization: `Bearer ${env.GROK_WEBHOOK_KEY}` });
+    const target = pickTarget(body, env);
+    const headers = new Headers({ authorization: `Bearer ${target.key}` });
     for (const name of FORWARDED_HEADERS) {
       const value = request.headers.get(name);
       if (value !== null) headers.set(name, value);
     }
 
     try {
-      return await fetch(env.GROK_WEBHOOK_URL, { method: "POST", headers, body });
+      return await fetch(target.url, { method: "POST", headers, body });
     } catch (err) {
       console.error("Forwarding to Grok failed:", err instanceof Error ? err.message : err);
       return new Response("Bad Gateway", { status: 502 });
     }
   },
 } satisfies ExportedHandler<Env>;
+
+interface GithubWebhookPayload {
+  installation?: { id?: unknown; account?: { login?: unknown } };
+  repository?: { owner?: { login?: unknown } };
+  organization?: { login?: unknown };
+}
+
+function isCarecise(p: unknown): boolean {
+  const lc = (v: unknown): string => (typeof v === "string" ? v.toLowerCase() : "");
+  const payload = (typeof p === "object" && p !== null ? p : {}) as GithubWebhookPayload;
+  return (
+    payload.installation?.id === CARECISE_INSTALLATION_ID ||
+    lc(payload.installation?.account?.login) === "carecise" ||
+    lc(payload.repository?.owner?.login) === "carecise" ||
+    lc(payload.organization?.login) === "carecise"
+  );
+}
+
+function pickTarget(body: ArrayBuffer, env: Env): { url: string; key: string } {
+  if (env.CARECISE_ROUTINE_URL && env.CARECISE_ROUTINE_KEY) {
+    let payload: unknown = null;
+    try {
+      payload = JSON.parse(new TextDecoder().decode(body));
+    } catch {
+      // The deployed worker ignores parse errors and uses the default target.
+    }
+    if (payload && isCarecise(payload)) {
+      return { url: env.CARECISE_ROUTINE_URL, key: env.CARECISE_ROUTINE_KEY };
+    }
+  }
+  return { url: env.GROK_WEBHOOK_URL, key: env.GROK_WEBHOOK_KEY };
+}
 
 async function isValidSignature(secret: string, body: ArrayBuffer, header: string): Promise<boolean> {
   if (!header.startsWith(SIGNATURE_PREFIX)) return false;

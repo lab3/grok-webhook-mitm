@@ -5,6 +5,11 @@ interface __BaseEnv_Env {
 	GITHUB_WEBHOOK_SECRET: string;
 	GROK_WEBHOOK_URL: string;
 	GROK_WEBHOOK_KEY: string;
+	// Optional, and not listed in wrangler.jsonc: deploy does not require them,
+	// and `wrangler types` will drop them on regenerate. Both must be set
+	// before Carecise events leave the default webhook.
+	CARECISE_ROUTINE_URL?: string;
+	CARECISE_ROUTINE_KEY?: string;
 }
 declare namespace Cloudflare {
 	interface Env extends __BaseEnv_Env {}
@@ -14,7 +19,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "GITHUB_WEBHOOK_SECRET" | "GROK_WEBHOOK_URL" | "GROK_WEBHOOK_KEY">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "GITHUB_WEBHOOK_SECRET" | "GROK_WEBHOOK_URL" | "GROK_WEBHOOK_KEY" | "CARECISE_ROUTINE_URL" | "CARECISE_ROUTINE_KEY">> {}
 }
 declare module "*.txt" {
 	const value: string;
