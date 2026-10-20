@@ -1,3 +1,5 @@
 GITHUB_WEBHOOK_SECRET=
 GROK_WEBHOOK_URL=
 GROK_WEBHOOK_KEY=
+CARECISE_ROUTINE_URL=https://example.invalid/carecise-routine
+CARECISE_ROUTINE_KEY=replace-me

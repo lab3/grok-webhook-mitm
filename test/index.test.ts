@@ -138,3 +138,123 @@ describe("signed deliveries", () => {
     expect(res.status).toBe(502);
   });
 });
+
+const CARECISE_URL = "https://carecise.example/hooks/routine";
+const CARECISE_KEY = "carecise-key-456";
+
+const careciseEnv: Env = {
+  ...env,
+  CARECISE_ROUTINE_URL: CARECISE_URL,
+  CARECISE_ROUTINE_KEY: CARECISE_KEY,
+};
+
+async function sign(body: string, secret = SECRET): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(body)));
+  const hex = [...mac].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `sha256=${hex}`;
+}
+
+async function signedJson(payload: unknown, signature?: string): Promise<{ request: Request; body: string }> {
+  const body = JSON.stringify(payload);
+  const request = githubDelivery(
+    { "x-hub-signature-256": signature ?? (await sign(body)) },
+    { body },
+  );
+  return { request, body };
+}
+
+describe("Carecise routing", () => {
+  it.each([
+    ["repository owner", { repository: { owner: { login: "Carecise" } } }],
+    ["organization", { organization: { login: "CARECISE" } }],
+    ["installation account", { installation: { account: { login: "carecise" } } }],
+  ])("routes a Carecise event detected by %s to the Carecise routine", async (_how, payload) => {
+    const sent = stubGrok(grokAccepts);
+    const { request, body } = await signedJson(payload);
+    const res = await worker.fetch(request, careciseEnv);
+
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(CARECISE_URL);
+    expect(sent[0].method).toBe("POST");
+    expect(sent[0].headers.get("authorization")).toBe(`Bearer ${CARECISE_KEY}`);
+    expect(sent[0].headers.get("x-github-event")).toBe("push");
+    expect(await sent[0].text()).toBe(body);
+  });
+
+  it("does not route by installation id when the logins are not Carecise", async () => {
+    const sent = stubGrok(grokAccepts);
+    const { request } = await signedJson({
+      installation: { id: 168716427, account: { login: "renamed" } },
+      repository: { owner: { login: "renamed" } },
+      organization: { login: "renamed" },
+    });
+    const res = await worker.fetch(request, careciseEnv);
+
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(env.GROK_WEBHOOK_URL);
+    expect(sent[0].headers.get("authorization")).toBe(`Bearer ${env.GROK_WEBHOOK_KEY}`);
+  });
+
+  it("routes a non-Carecise event to the default Grok webhook", async () => {
+    const sent = stubGrok(grokAccepts);
+    const { request, body } = await signedJson({
+      installation: { id: 42, account: { login: "acme" } },
+      repository: { owner: { login: "acme" } },
+      organization: { login: "acme" },
+    });
+    const res = await worker.fetch(request, careciseEnv);
+
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(env.GROK_WEBHOOK_URL);
+    expect(sent[0].headers.get("authorization")).toBe(`Bearer ${env.GROK_WEBHOOK_KEY}`);
+    expect(await sent[0].text()).toBe(body);
+  });
+
+  it("falls back to the default webhook when Carecise vars are unset", async () => {
+    const sent = stubGrok(grokAccepts);
+    const { request } = await signedJson({ repository: { owner: { login: "Carecise" } } });
+    const res = await worker.fetch(request, env);
+
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(env.GROK_WEBHOOK_URL);
+    expect(sent[0].headers.get("authorization")).toBe(`Bearer ${env.GROK_WEBHOOK_KEY}`);
+  });
+
+  it.each([
+    ["only the URL is set", { CARECISE_ROUTINE_URL: CARECISE_URL }],
+    ["only the key is set", { CARECISE_ROUTINE_KEY: CARECISE_KEY }],
+  ])("falls back to the default webhook when %s", async (_how, partial) => {
+    const sent = stubGrok(grokAccepts);
+    const { request } = await signedJson({ organization: { login: "carecise" } });
+    const res = await worker.fetch(request, { ...env, ...partial });
+
+    expect(res.status).toBe(202);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe(env.GROK_WEBHOOK_URL);
+    expect(sent[0].headers.get("authorization")).toBe(`Bearer ${env.GROK_WEBHOOK_KEY}`);
+  });
+
+  it("rejects a bad signature without forwarding", async () => {
+    const sent = stubGrok(grokAccepts);
+    const { request } = await signedJson(
+      { repository: { owner: { login: "Carecise" } } },
+      "sha256=" + "ab".repeat(32),
+    );
+    const res = await worker.fetch(request, careciseEnv);
+
+    expect(res.status).toBe(401);
+    expect(await res.text()).toBe("Invalid signature");
+    expect(sent).toHaveLength(0);
+  });
+});

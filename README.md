@@ -9,30 +9,42 @@ It runs at `https://grok-webhook-mitm.workarea.io/`.
 
 ## Behaviour
 
-| Request | Response | Forwarded to Grok |
+The Worker checks `X-Hub-Signature-256` before it forwards anything.
+
+| Request | Response | Forwarded |
 | --- | --- | --- |
 | Any method other than POST | 405 | No |
 | Missing, malformed or wrong signature | 401 | No |
 | Valid signature, `X-GitHub-Event: ping` | 200 `pong` | No |
-| Valid signature, any other event | Grok's status and body | Yes |
-| Valid signature, Grok unreachable | 502 | Attempted |
+| Valid signature, Carecise event, both Carecise secrets set | Carecise routine's status and body | `CARECISE_ROUTINE_URL` |
+| Valid signature, any other event | Default Grok status and body | `GROK_WEBHOOK_URL` |
+| Valid signature, chosen target unreachable | 502 | Attempted |
 
-The Worker forwards the body byte for byte, along with `Content-Type`,
-`X-GitHub-Event` and `X-GitHub-Delivery`.
+A delivery counts as Carecise when `installation.account.login`, `repository.owner.login`, or `organization.login` is `carecise` (any case).
 
-GitHub gives up on a delivery after 10 seconds. If Grok takes longer to
-respond, GitHub records a failure even though Grok received the event.
+If either Carecise secret is unset, or the body is not valid JSON, the delivery uses the default Grok webhook.
+The body is forwarded byte for byte, with `Content-Type`, `X-GitHub-Event`
+and `X-GitHub-Delivery`, plus `Authorization: Bearer <key>` for the target
+that was chosen.
+
+GitHub gives up on a delivery after 10 seconds. If the target takes longer to
+respond, GitHub records a failure even though the target received the event.
 
 ## Secrets
 
 | Name | Value |
 | --- | --- |
 | `GITHUB_WEBHOOK_SECRET` | The secret you enter in GitHub's webhook settings |
-| `GROK_WEBHOOK_URL` | The Grok webhook URL |
-| `GROK_WEBHOOK_KEY` | The Grok webhook key, without the `Bearer ` prefix |
+| `GROK_WEBHOOK_URL` | The default Grok webhook URL |
+| `GROK_WEBHOOK_KEY` | The default Grok webhook key, without the `Bearer ` prefix |
+| `CARECISE_ROUTINE_URL` | Optional. Carecise routine URL. Used only when this and `CARECISE_ROUTINE_KEY` are both set |
+| `CARECISE_ROUTINE_KEY` | Optional. Carecise routine key, without the `Bearer ` prefix |
 
 Set each one with `npx wrangler secret put <NAME>`, which prompts for the
-value. `wrangler deploy` refuses to run until all three are set.
+value. `wrangler deploy` refuses to run until the three required secrets
+(`GITHUB_WEBHOOK_SECRET`, `GROK_WEBHOOK_URL`, `GROK_WEBHOOK_KEY`) are set.
+The Carecise pair is optional. Setting only one of them leaves Carecise
+events on the default webhook.
 
 Run `wrangler secret put` from this directory. Wrangler reads the Worker name
 from `wrangler.jsonc`, and from anywhere else the secret doesn't reach this
@@ -59,8 +71,9 @@ For either kind:
 - Secret: the value of `GITHUB_WEBHOOK_SECRET`
 - SSL verification: enabled
 
-The Worker forwards every event except `ping`, so the events you subscribe to
-are the events Grok receives.
+The Worker forwards every event except `ping`. Carecise events go to the
+Carecise routine when that pair of secrets is set. Everything else goes to
+the default Grok webhook.
 
 A new repository webhook gets a ping, and a 200 `pong` confirms the secret
 matches. After changing the secret, trigger a fresh event to test it. A
